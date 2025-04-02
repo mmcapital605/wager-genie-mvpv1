@@ -21,5 +21,13 @@
       "path": "/api/cron/odds",
       "schedule": "0 8,14,20 * * *"
     }
+  ],
+  "domains": ["wagergenie.ai"],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/chat",
+      "permanent": true
+    }
   ]
 } 
