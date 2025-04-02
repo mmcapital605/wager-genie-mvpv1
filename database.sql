@@ -83,37 +83,35 @@ CREATE TABLE picks (
 
 -- Create chat_messages table
 CREATE TABLE chat_messages (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  pick_id UUID REFERENCES picks(id) ON DELETE SET NULL,
-  role CHAT_ROLE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    picks JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
 -- Create odds_data table
 CREATE TABLE odds_data (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  sport SPORT_TYPE NOT NULL,
-  event_id TEXT NOT NULL UNIQUE,
-  home_team TEXT NOT NULL,
-  away_team TEXT NOT NULL,
-  commence_time TIMESTAMP WITH TIME ZONE NOT NULL,
-  odds_data JSONB NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sport TEXT NOT NULL,
+    event TEXT NOT NULL,
+    market TEXT NOT NULL,
+    odds JSONB NOT NULL,
+    fetched_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
 -- Create scraped_picks table
 CREATE TABLE scraped_picks (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source_url TEXT NOT NULL,
-  sport SPORT_TYPE NOT NULL,
-  event TEXT NOT NULL,
-  prediction TEXT NOT NULL,
-  confidence TEXT,
-  analysis TEXT,
-  raw_data JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event TEXT NOT NULL,
+    prediction TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'pickdawgz',
+    confidence INTEGER,
+    scraped_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
 -- Create indexes
@@ -121,12 +119,13 @@ CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
 CREATE INDEX idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
-CREATE INDEX idx_chat_messages_user_id ON chat_messages(user_id);
-CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at);
+CREATE INDEX chat_messages_user_id_idx ON chat_messages(user_id);
+CREATE INDEX chat_messages_created_at_idx ON chat_messages(created_at);
 CREATE INDEX idx_picks_created_at ON picks(created_at);
 CREATE INDEX idx_picks_user_id ON picks(user_id);
-CREATE INDEX idx_odds_data_sport ON odds_data(sport);
-CREATE INDEX idx_scraped_picks_created_at ON scraped_picks(created_at);
+CREATE INDEX scraped_picks_created_at_idx ON scraped_picks(created_at);
+CREATE INDEX odds_data_sport_event_idx ON odds_data(sport, event);
+CREATE INDEX odds_data_fetched_at_idx ON odds_data(fetched_at);
 
 -- Enable RLS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -191,4 +190,41 @@ BEGIN
       current_period_start = EXCLUDED.current_period_start,
       current_period_end = EXCLUDED.current_period_end,
       updated_at = TIMEZONE('utc', NOW());
-END $$; 
+END $$;
+
+-- Create policies for chat_messages
+CREATE POLICY "Users can view their own messages"
+    ON chat_messages FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own messages"
+    ON chat_messages FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+-- Create policies for scraped_picks
+CREATE POLICY "Everyone can view scraped picks"
+    ON scraped_picks FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE POLICY "Only cron can insert scraped picks"
+    ON scraped_picks FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() IN (
+        SELECT id FROM auth.users WHERE email = 'cron@wagergenie.com'
+    ));
+
+-- Create policies for odds_data
+CREATE POLICY "Everyone can view odds data"
+    ON odds_data FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE POLICY "Only cron can insert odds data"
+    ON odds_data FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() IN (
+        SELECT id FROM auth.users WHERE email = 'cron@wagergenie.com'
+    )); 

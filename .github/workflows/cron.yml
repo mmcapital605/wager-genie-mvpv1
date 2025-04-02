@@ -1,0 +1,24 @@
+name: Cron Jobs
+
+on:
+  schedule:
+    # Run at 8 AM, 2 PM, and 8 PM UTC
+    - cron: '0 8,14,20 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  scrape-picks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger scraping endpoint
+        run: |
+          curl -X GET "${{ secrets.VERCEL_URL }}/api/cron/scrape" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+  fetch-odds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger odds fetching endpoint
+        run: |
+          curl -X GET "${{ secrets.VERCEL_URL }}/api/cron/odds" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" 
