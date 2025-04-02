@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useEffect, useRef } from 'react'
 import { useUser } from '@supabase/auth-helpers-react'
 import { ChatService, ChatMessageWithPick } from '@/lib/chat-service'
