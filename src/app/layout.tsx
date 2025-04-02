@@ -7,8 +7,8 @@ import { Navigation } from '@/components/Navigation'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Wager Genie - Your Magical Sports Betting Assistant',
-  description: 'Get winning sports picks from your personal betting Genie! One free pick daily, with premium plans for more magical insights.',
+  title: 'Wager Genie',
+  description: 'Your AI-powered sports betting assistant',
 }
 
 export default function RootLayout({
@@ -21,8 +21,8 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
-          enableSystem={false}
+          defaultTheme="system"
+          enableSystem
           disableTransitionOnChange
         >
           <header className="border-b">
