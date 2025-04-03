@@ -1,122 +1,74 @@
 "use client"
 
 import { useState, useEffect, useRef } from 'react'
-import { useUser } from '@supabase/auth-helpers-react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
+import { createBrowserClient } from '@supabase/ssr'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { ChatService, ChatMessageWithPick } from '@/lib/chat-service'
 
 interface Message {
-  id: string
   role: 'user' | 'assistant'
   content: string
-  picks?: {
-    event: string
-    prediction: string
-    odds?: string
-    source?: 'odds_api' | 'pickdawgz'
-    confidence?: number
-  }
-  created_at: string
+  picks?: any
 }
 
 export function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const user = useUser()
-  const supabase = createClientComponentClient()
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
 
   useEffect(() => {
-    if (user) {
-      loadMessages()
+    loadMessages()
+  }, [])
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [user])
-
-  useEffect(() => {
-    scrollToBottom()
   }, [messages])
 
   const loadMessages = async () => {
-    if (!user) return
-    try {
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
 
-      if (error) throw error
-      setMessages(data || [])
-    } catch (error) {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .order('created_at', { ascending: true })
+
+    if (error) {
       console.error('Error loading messages:', error)
+      return
     }
+
+    setMessages(data || [])
   }
 
-  const scrollToBottom = () => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
-    }
-  }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
 
-  const handleSend = async () => {
-    if (!user || !input.trim() || isLoading) return
-
+    const userMessage = { role: 'user' as const, content: input }
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
     setIsLoading(true)
+
     try {
-      // Add user message to chat
-      const userMessage = {
-        role: 'user',
-        content: input.trim(),
-        user_id: user.id,
-        created_at: new Date().toISOString()
-      }
-
-      const { data: savedMessage, error: saveError } = await supabase
-        .from('chat_messages')
-        .insert([userMessage])
-        .select()
-        .single()
-
-      if (saveError) throw saveError
-      setMessages(prev => [...prev, savedMessage])
-      setInput('')
-
-      // Get AI response
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: input.trim(),
-          userId: user.id,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: input }),
       })
 
-      if (!response.ok) throw new Error('Failed to get AI response')
-      
-      const aiResponse = await response.json()
-      const { data: savedAiMessage, error: aiSaveError } = await supabase
-        .from('chat_messages')
-        .insert([{
-          role: 'assistant',
-          content: aiResponse.message,
-          picks: aiResponse.picks,
-          user_id: user.id,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single()
+      if (!response.ok) throw new Error('Failed to send message')
 
-      if (aiSaveError) throw aiSaveError
-      setMessages(prev => [...prev, savedAiMessage])
-
+      const data = await response.json()
+      setMessages(prev => [...prev, data])
     } catch (error) {
       console.error('Error sending message:', error)
     } finally {
@@ -124,87 +76,58 @@ export function Chat() {
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
   return (
-    <Card className="mx-auto max-w-2xl">
-      <CardContent className="p-4">
-        <ScrollArea className="h-[600px] pr-4" ref={scrollAreaRef}>
-          <div className="flex flex-col space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex items-start gap-3 ${
-                  message.role === 'assistant' ? 'flex-row' : 'flex-row-reverse'
-                }`}
-              >
-                <Avatar className="h-8 w-8 shrink-0">
-                  {message.role === 'assistant' ? (
-                    <>
-                      <AvatarImage src="/genie-avatar.svg" alt="Genie" />
-                      <AvatarFallback>WG</AvatarFallback>
-                    </>
-                  ) : (
-                    <>
-                      <AvatarImage src={user?.user_metadata?.avatar_url} alt={user?.user_metadata?.full_name} />
-                      <AvatarFallback>{user?.email?.[0].toUpperCase()}</AvatarFallback>
-                    </>
-                  )}
-                </Avatar>
+    <div className="flex flex-col h-[calc(100vh-4rem)]">
+      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="space-y-4">
+          {messages.map((message, i) => (
+            <div
+              key={i}
+              className={`flex ${
+                message.role === 'assistant' ? 'justify-start' : 'justify-end'
+              }`}
+            >
+              <div className="flex items-start gap-2 max-w-[80%]">
+                {message.role === 'assistant' && (
+                  <Avatar>
+                    <AvatarImage src="/genie-avatar.svg" alt="Genie" />
+                    <AvatarFallback>WG</AvatarFallback>
+                  </Avatar>
+                )}
                 <div
-                  className={`rounded-lg p-4 max-w-[80%] ${
+                  className={`rounded-lg p-4 ${
                     message.role === 'assistant'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted'
+                      ? 'bg-secondary text-secondary-foreground'
+                      : 'bg-primary text-primary-foreground'
                   }`}
                 >
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                  <p className="whitespace-pre-wrap">{message.content}</p>
                   {message.picks && (
-                    <div className="mt-2 pt-2 border-t border-primary/20">
-                      <p className="text-xs font-medium mb-1">🎯 Pick Details:</p>
-                      <div className="text-xs space-y-1">
-                        <p className="font-semibold">{message.picks.event}</p>
-                        <p>{message.picks.prediction}</p>
-                        {message.picks.odds && (
-                          <p className="text-xs opacity-80">Odds: {message.picks.odds}</p>
-                        )}
-                        {message.picks.source && (
-                          <p className="text-xs opacity-80">Source: {message.picks.source}</p>
-                        )}
-                        {message.picks.confidence && (
-                          <p className="text-xs opacity-80">Confidence: {message.picks.confidence}%</p>
-                        )}
-                      </div>
+                    <div className="mt-2 p-2 bg-background/10 rounded">
+                      <pre className="text-sm">{JSON.stringify(message.picks, null, 2)}</pre>
                     </div>
                   )}
                 </div>
               </div>
-            ))}
-          </div>
-        </ScrollArea>
-        <div className="mt-4 flex items-center gap-2 border-t pt-4">
-          <Input
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+      <form onSubmit={handleSubmit} className="p-4 border-t">
+        <div className="flex gap-2">
+          <input
+            type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask the Genie for picks..."
+            placeholder="Ask about sports picks..."
+            className="flex-1 px-4 py-2 rounded-lg border focus:outline-none focus:ring-2"
             disabled={isLoading}
-            className="flex-1"
           />
-          <Button
-            onClick={handleSend}
-            disabled={isLoading || !input.trim()}
-            className="shrink-0"
-          >
-            {isLoading ? "Thinking..." : "Send"}
+          <Button type="submit" disabled={isLoading}>
+            {isLoading ? 'Thinking...' : 'Send'}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </form>
+    </div>
   )
 } 
