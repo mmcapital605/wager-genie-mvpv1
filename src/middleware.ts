@@ -9,37 +9,47 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
+  try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set(name: string, value: string, options: any) {
+            response.cookies.set({ name, value, ...options })
+          },
+          remove(name: string, options: any) {
+            response.cookies.set({ name, value: '', ...options })
+          },
         },
-        set(name: string, value: string, options: any) {
-          response.cookies.set({ name, value, ...options })
-        },
-        remove(name: string, options: any) {
-          response.cookies.set({ name, value: '', ...options })
-        },
-      },
+      }
+    )
+
+    const { data: { session } } = await supabase.auth.getSession()
+
+    // Get the current URL
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}`
+      : `http://${request.headers.get('host')}`
+
+    // If user is not signed in and the current path is not /sign-in, redirect to /sign-in
+    if (!session && request.nextUrl.pathname !== '/sign-in') {
+      return NextResponse.redirect(new URL('/sign-in', baseUrl))
     }
-  )
 
-  const { data: { session } } = await supabase.auth.getSession()
+    // If user is signed in and the current path is /sign-in, redirect to /chat
+    if (session && request.nextUrl.pathname === '/sign-in') {
+      return NextResponse.redirect(new URL('/chat', baseUrl))
+    }
 
-  // If user is not signed in and the current path is not /sign-in, redirect to /sign-in
-  if (!session && request.nextUrl.pathname !== '/sign-in') {
-    return NextResponse.redirect(new URL('/sign-in', request.url))
+    return response
+  } catch (error) {
+    console.error('Middleware error:', error)
+    return response
   }
-
-  // If user is signed in and the current path is /sign-in, redirect to /chat
-  if (session && request.nextUrl.pathname === '/sign-in') {
-    return NextResponse.redirect(new URL('/chat', request.url))
-  }
-
-  return response
 }
 
 export const config = {
