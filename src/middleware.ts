@@ -31,18 +31,20 @@ export async function middleware(request: NextRequest) {
     const { data: { session } } = await supabase.auth.getSession()
 
     // Get the current URL
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : `http://${request.headers.get('host')}`
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http'
+    const host = request.headers.get('host') || 'localhost:3000'
+    const baseUrl = `${protocol}://${host}`
 
     // If user is not signed in and the current path is not /sign-in, redirect to /sign-in
     if (!session && request.nextUrl.pathname !== '/sign-in') {
-      return NextResponse.redirect(new URL('/sign-in', baseUrl))
+      const signInUrl = new URL('/sign-in', baseUrl)
+      return NextResponse.redirect(signInUrl)
     }
 
     // If user is signed in and the current path is /sign-in, redirect to /chat
     if (session && request.nextUrl.pathname === '/sign-in') {
-      return NextResponse.redirect(new URL('/chat', baseUrl))
+      const chatUrl = new URL('/chat', baseUrl)
+      return NextResponse.redirect(chatUrl)
     }
 
     return response
