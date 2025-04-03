@@ -1,4 +1,4 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import * as cheerio from 'cheerio'
@@ -29,40 +29,68 @@ async function scrapePickDawgz() {
 
 export async function GET(request: Request) {
   try {
-    // Verify cron secret to ensure this is called by the cron job
+    // Verify cron secret
     const authHeader = request.headers.get('authorization')
     if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const supabase = createRouteHandlerClient({ cookies })
-    
-    // Scrape picks
-    const picks = await scrapePickDawgz()
-    
-    // Store in database
+    const cookieStore = cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set(name: string, value: string, options: any) {
+            cookieStore.set({ name, value, ...options })
+          },
+          remove(name: string, options: any) {
+            cookieStore.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
+
+    // Fetch the webpage
+    const response = await fetch('https://www.pickdawgz.com')
+    if (!response.ok) {
+      throw new Error('Failed to fetch webpage')
+    }
+
+    const html = await response.text()
+    const $ = cheerio.load(html)
+
+    // Extract picks
+    const picks = $('.pick-card').map((_, element) => {
+      const $el = $(element)
+      return {
+        event: $el.find('.event-name').text().trim(),
+        prediction: $el.find('.prediction').text().trim(),
+        confidence: parseInt($el.find('.confidence').text().trim().replace('%', '')) || 0,
+        source: 'pickdawgz'
+      }
+    }).get()
+
+    // Store picks in Supabase
     if (picks.length > 0) {
       const { error } = await supabase
         .from('scraped_picks')
-        .insert(
-          picks.map(pick => ({
-            ...pick,
-            source: 'pickdawgz',
-            scraped_at: new Date().toISOString()
-          }))
-        )
+        .insert(picks.map(pick => ({
+          ...pick,
+          created_at: new Date().toISOString()
+        })))
 
-      if (error) throw error
+      if (error) {
+        throw error
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      picksCount: picks.length,
-      timestamp: new Date().toISOString()
-    })
-
+    return NextResponse.json({ success: true, picks_count: picks.length })
   } catch (error) {
-    console.error('Error in scrape API:', error)
+    console.error('Scraping error:', error)
     return new NextResponse('Internal Server Error', { status: 500 })
   }
 } 

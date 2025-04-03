@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
-import type { ChatMessage } from '@/lib/supabase'
+import { createBrowserClient } from '@supabase/ssr'
+import { ChatMessage } from '@/types/chat'
 
 export default function ChatInterface({ userId }: { userId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -8,66 +8,64 @@ export default function ChatInterface({ userId }: { userId: string }) {
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   useEffect(() => {
-    loadMessages()
-    const channel = supabase
-      .channel('chat_messages')
-      .on('INSERT', { event: '*', schema: 'public', table: 'chat_messages' }, 
+    const setupSubscription = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+
+      const channel = supabase
+        .channel('chat_messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, 
           payload => {
-            if (payload.new.user_id === userId) {
+            if (payload.new.user_id === session.user.id) {
               setMessages(prev => [...prev, payload.new as ChatMessage])
             }
           }
-      )
-      .subscribe()
+        )
+        .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
+      return () => {
+        channel.unsubscribe()
+      }
     }
-  }, [userId])
+
+    setupSubscription()
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
-  const loadMessages = async () => {
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-
-    if (error) {
-      console.error('Error loading messages:', error)
-      return
-    }
-
-    setMessages(data || [])
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    if (!input.trim()) return
 
     setIsLoading(true)
     try {
-      const response = await fetch('http://localhost:5000/api/chat', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: input,
-          user_id: userId,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [...messages, { role: 'user', content: input }] }),
       })
 
-      if (!response.ok) throw new Error('Failed to send message')
+      if (!response.ok) {
+        throw new Error('Failed to send message')
+      }
 
+      const data = await response.json()
+      setMessages(prev => [...prev, 
+        { role: 'user', content: input },
+        data.message
+      ])
       setInput('')
     } catch (error) {
       console.error('Error sending message:', error)
